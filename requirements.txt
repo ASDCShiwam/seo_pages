@@ -6,3 +6,4 @@ elasticsearch
 fastapi
 uvicorn[standard]
 loguru
+aiohttp
