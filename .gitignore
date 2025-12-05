@@ -1,0 +1,24 @@
+# Virtual environments
+venv/
+.env/
+.venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# VSCode settings
+.vscode/
+
+# Environment and config
+*.env
+*.log
+
+# Byte-compiled
+*.egg-info/
+dist/
+build/

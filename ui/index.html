@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Offline Search (Localhost)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; background:#111; color:#eee; }
+    .result { margin-bottom: 1rem; padding-bottom:1rem; border-bottom:1px solid #444; }
+    input[type="text"] { width: 400px; padding:0.5rem; }
+    button { padding:0.5rem 1rem; margin-left:0.5rem; }
+    .snippet { color:#ccc; margin-top:0.25rem; }
+    a { color:#5af; text-decoration:none; }
+    a:hover { text-decoration:underline; }
+  </style>
+</head>
+<body>
+  <h1>Offline Search (Localhost)</h1>
+  <input id="q" type="text" placeholder="Search..." />
+  <button onclick="doSearch()">Search</button>
+  <div id="results" style="margin-top:1.5rem;"></div>
+
+  <script>
+    async function doSearch() {
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  const resDiv = document.getElementById('results');
+  resDiv.innerHTML = 'Searching...';
+
+  try {
+    const res = await fetch('http://localhost:8000/search?q=' + encodeURIComponent(q));
+    if (!res.ok) {
+      throw new Error('Network response was not ok');
+    }
+    const data = await res.json();
+
+    if (!data.length) {
+      resDiv.innerHTML = '<p>No results.</p>';
+      return;
+    }
+
+    resDiv.innerHTML = '';
+    data.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'result';
+      div.innerHTML = `
+        <a href="${item.url}" target="_blank"><h3>${item.title || item.url}</h3></a>
+        <div class="snippet">${item.snippet}</div>
+        <small>Score: ${item.score.toFixed(2)}</small>
+      `;
+      resDiv.appendChild(div);
+    });
+  } catch (e) {
+    resDiv.innerHTML = 'Error calling search API: ' + e.message;
+    console.error(e);
+  }
+}
+
+    
+  </script>
+</body>
+</html>
