@@ -4,7 +4,7 @@ ELASTICSEARCH_INDEX = "seo_pages"
 # For now you can use some simple site to test.
 # Later change to http://localhost/your_iis_site/, etc.
 SEED_URLS = [
-    "https://testbook.com/",   # change this when you want intranet only
+    "https://delhi.gov.in/page/police",   # change this when you want intranet only
 ]
 
 CRAWL_MAX_PAGES = 50            # keep small for testing
