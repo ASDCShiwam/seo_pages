@@ -32,12 +32,7 @@ def parse_html(url: str, html: str) -> dict:
     meta_desc = ""
     meta_keywords = ""
 
-    for meta in soup.find_all("meta"):
-        name = (meta.get("name") or meta.get("property") or "").lower()
-        if name == "description":
-            meta_desc = meta.get("content", "") or ""
-        elif name == "keywords":
-            meta_keywords = meta.get("content", "") or ""
+     
 
     return {
         "url": url,

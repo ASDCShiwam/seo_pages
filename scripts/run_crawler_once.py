@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 
@@ -7,16 +8,16 @@ if BASE_DIR not in sys.path:
     sys.path.append(BASE_DIR)
 
 from app.crawler import Crawler
-from app.parser_cleaner import parse_html
 from app.indexer import Indexer
+from app.parser_cleaner import parse_html
 from loguru import logger
 
 
-def main():
+async def main():
     crawler = Crawler()
     indexer = Indexer()
 
-    for url, html in crawler.crawl():
+    async for url, html in crawler.crawl():
         try:
             doc = parse_html(url, html)
             if doc["content_length"] < 50:
@@ -28,7 +29,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
 
 
 #python .\scripts\run_crawler_once.py
