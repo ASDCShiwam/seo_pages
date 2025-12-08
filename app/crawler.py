@@ -17,6 +17,7 @@ from .config import (
     CRAWL_MAX_RETRIES,
     CRAWL_RETRY_BACKOFF,
 )
+from .robots_manager import RobotsManager
 
 
 class Crawler:
@@ -47,6 +48,7 @@ class Crawler:
         self.stop_event = asyncio.Event()
         self.start_time = time.monotonic()
         self.fetch_semaphore = asyncio.Semaphore(self.concurrency)
+        self.robots_manager = RobotsManager(USER_AGENT)
 
     def same_domain(self, base_url: str, new_url: str) -> bool:
         if not self.same_domain_only:
@@ -145,6 +147,14 @@ class Crawler:
             try:
                 if self.stop_event.is_set():
                     continue
+
+                await self.robots_manager.ensure_rules(session, url)
+                if not self.robots_manager.is_allowed(url):
+                    logger.info(f"Blocked by robots.txt: {url}")
+                    await self._mark_visited(url)
+                    continue
+
+                await self.robots_manager.wait_for_crawl_delay(url)
 
                 html = await self.fetch(session, url)
                 page_number = await self._increment_pages()
