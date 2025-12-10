@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from elasticsearch import Elasticsearch
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from pydantic import BaseModel
@@ -17,7 +17,11 @@ from .config import (
     RECENT_CLICK_DECAY_MULTIPLIER,
 )
 from .index_schemas import ensure_indices
-from .ranking import compute_ranking_score, current_time_ms
+from .ranking import (
+    compute_decay_hours,
+    compute_ranking_score,
+    current_time_ms,
+)
 
 app = FastAPI(title="Offline SEO Search API")
 
@@ -50,6 +54,19 @@ class ClickEvent(BaseModel):
     url: str
     user_id: str | None = None
     metadata: dict[str, Any] | None = None
+
+
+class RankingDebug(BaseModel):
+    url: str
+    clicks_total: int
+    recent_clicks: float
+    last_clicked_at: str | None
+    last_clicked_at_ms: int | None
+    stored_ranking_score: float | None
+    recomputed_ranking_score: float
+    decay_hours: float
+    decay_per_hour: float
+    formula: str
 
 
 CLICK_UPDATE_SCRIPT = """
@@ -224,6 +241,38 @@ async def track_click(event: ClickEvent) -> dict:
     )
 
     return {"status": "tracked", "url": event.url}
+
+
+@app.get("/debug/ranking", response_model=RankingDebug)
+def debug_ranking(url: str = Query(..., description="Exact URL / document ID to inspect")):
+    ensure_indices(es)
+    try:
+        doc = es.get(index=ELASTICSEARCH_INDEX, id=url)
+    except Exception as exc:  # pragma: no cover - passthrough for clarity
+        raise HTTPException(status_code=404, detail=f"Document not found: {url}") from exc
+
+    src = doc.get("_source", {})
+    now_ms = current_time_ms()
+    decay_hours = compute_decay_hours(src.get("last_clicked_at_ms"), now_ms=now_ms)
+    recomputed = compute_ranking_score(
+        clicks_total=src.get("clicks_total", 0),
+        recent_clicks=src.get("recent_clicks", 0.0),
+        last_clicked_at_ms=src.get("last_clicked_at_ms"),
+        now_ms=now_ms,
+    )
+
+    return RankingDebug(
+        url=src.get("url", url),
+        clicks_total=src.get("clicks_total", 0),
+        recent_clicks=float(src.get("recent_clicks", 0.0) or 0.0),
+        last_clicked_at=src.get("last_clicked_at"),
+        last_clicked_at_ms=src.get("last_clicked_at_ms"),
+        stored_ranking_score=src.get("ranking_score"),
+        recomputed_ranking_score=recomputed,
+        decay_hours=decay_hours,
+        decay_per_hour=RANKING_DECAY_PER_HOUR,
+        formula="log(clicks_total + 1) + (recent_clicks * 0.7) - (decay_hours * decay_per_hour)",
+    )
 
 
 # Run:
