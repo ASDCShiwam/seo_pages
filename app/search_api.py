@@ -1,9 +1,27 @@
-from fastapi import FastAPI, Query
-from pydantic import BaseModel
-from elasticsearch import Elasticsearch
-from fastapi.middleware.cors import CORSMiddleware
+import asyncio
+from datetime import datetime, timezone
+from typing import Any, Optional
 
-from .config import ELASTICSEARCH_URL, ELASTICSEARCH_INDEX
+from elasticsearch import Elasticsearch
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger
+from pydantic import BaseModel
+
+from .config import (
+    CLICK_EVENTS_INDEX,
+    DECAY_JOB_INTERVAL_SECONDS,
+    ELASTICSEARCH_INDEX,
+    ELASTICSEARCH_URL,
+    RANKING_DECAY_PER_HOUR,
+    RECENT_CLICK_DECAY_MULTIPLIER,
+)
+from .index_schemas import ensure_indices
+from .ranking import (
+    compute_decay_hours,
+    compute_ranking_score,
+    current_time_ms,
+)
 
 app = FastAPI(title="Offline SEO Search API")
 
@@ -17,6 +35,7 @@ app.add_middleware(
 )
 
 es = Elasticsearch(ELASTICSEARCH_URL)
+decay_task: asyncio.Task | None = None
 
 
 class SearchResult(BaseModel):
@@ -24,15 +43,59 @@ class SearchResult(BaseModel):
     title: str
     snippet: str
     score: float
+    ranking_score: Optional[float] = None
     h1: str | None = None
     meta_description: str | None = None
     crawled_at: str | None = None
     content_length: int | None = None
 
 
-@app.get("/search", response_model=list[SearchResult])
-def search(q: str = Query(..., min_length=1), size: int = 10):
-    body = {
+class ClickEvent(BaseModel):
+    url: str
+    user_id: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class RankingDebug(BaseModel):
+    url: str
+    clicks_total: int
+    recent_clicks: float
+    last_clicked_at: str | None
+    last_clicked_at_ms: int | None
+    stored_ranking_score: float | None
+    recomputed_ranking_score: float
+    decay_hours: float
+    decay_per_hour: float
+    formula: str
+
+
+CLICK_UPDATE_SCRIPT = """
+if (ctx._source.clicks_total == null) { ctx._source.clicks_total = 0; }
+if (ctx._source.recent_clicks == null) { ctx._source.recent_clicks = 0.0; }
+long prevLast = ctx._source.containsKey('last_clicked_at_ms') && ctx._source.last_clicked_at_ms != null ? ctx._source.last_clicked_at_ms : params.now_ms;
+ctx._source.clicks_total += 1;
+ctx._source.recent_clicks += 1;
+ctx._source.last_clicked_at_ms = params.now_ms;
+ctx._source.last_clicked_at = params.now_iso;
+double decayHours = (params.now_ms - prevLast) / 3_600_000.0;
+double decay = decayHours * params.decay_per_hour;
+ctx._source.ranking_score = Math.log(ctx._source.clicks_total + 1.0) + (ctx._source.recent_clicks * 0.7) - decay;
+"""
+
+DECAY_SCRIPT = """
+if (ctx._source.recent_clicks == null) { ctx._source.recent_clicks = 0.0; }
+if (ctx._source.clicks_total == null) { ctx._source.clicks_total = 0; }
+ctx._source.recent_clicks = ctx._source.recent_clicks * params.recent_click_multiplier;
+if (ctx._source.recent_clicks < 0.01) { ctx._source.recent_clicks = 0.0; }
+long last = ctx._source.containsKey('last_clicked_at_ms') && ctx._source.last_clicked_at_ms != null ? ctx._source.last_clicked_at_ms : params.now_ms;
+double decayHours = (params.now_ms - last) / 3_600_000.0;
+double decay = decayHours * params.decay_per_hour;
+ctx._source.ranking_score = Math.log(ctx._source.clicks_total + 1.0) + (ctx._source.recent_clicks * 0.7) - decay;
+"""
+
+
+def build_search_body(q: str) -> dict:
+    return {
         "query": {
             "multi_match": {
                 "query": q,
@@ -49,7 +112,55 @@ def search(q: str = Query(..., min_length=1), size: int = 10):
                 "content": {},
             }
         },
+        "sort": [
+            {"ranking_score": {"order": "desc", "missing": "_last"}},
+            {"_score": {"order": "desc"}},
+        ],
     }
+
+
+async def decay_loop() -> None:
+    while True:
+        await asyncio.sleep(DECAY_JOB_INTERVAL_SECONDS)
+        try:
+            await asyncio.to_thread(apply_decay)
+        except Exception as exc:  # pragma: no cover - background resilience
+            logger.error(f"Decay loop failed: {exc}")
+
+
+def apply_decay() -> None:
+    now_ms = current_time_ms()
+    logger.info("Applying ranking decay to all documents")
+    es.update_by_query(
+        index=ELASTICSEARCH_INDEX,
+        body={
+            "query": {"match_all": {}},
+            "script": {
+                "source": DECAY_SCRIPT,
+                "lang": "painless",
+                "params": {
+                    "recent_click_multiplier": RECENT_CLICK_DECAY_MULTIPLIER,
+                    "now_ms": now_ms,
+                    "decay_per_hour": RANKING_DECAY_PER_HOUR,
+                },
+            },
+        },
+        conflicts="proceed",
+        refresh=True,
+    )
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    ensure_indices(es)
+    global decay_task
+    if decay_task is None:
+        decay_task = asyncio.create_task(decay_loop())
+
+
+@app.get("/search", response_model=list[SearchResult])
+def search(q: str = Query(..., min_length=1), size: int = 10):
+    body = build_search_body(q)
 
     resp = es.search(index=ELASTICSEARCH_INDEX, body=body, size=size)
     results: list[SearchResult] = []
@@ -65,6 +176,7 @@ def search(q: str = Query(..., min_length=1), size: int = 10):
                 title=src.get("title", "") or src.get("url", ""),
                 snippet=snippet,
                 score=float(hit["_score"]),
+                ranking_score=src.get("ranking_score"),
                 h1=src.get("h1"),
                 meta_description=src.get("meta_description"),
                 crawled_at=src.get("crawled_at"),
@@ -73,6 +185,95 @@ def search(q: str = Query(..., min_length=1), size: int = 10):
         )
 
     return results
+
+
+@app.post("/track_click")
+async def track_click(event: ClickEvent) -> dict:
+    ensure_indices(es)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    now_ms = current_time_ms()
+
+    await asyncio.to_thread(
+        es.index,
+        index=CLICK_EVENTS_INDEX,
+        document={
+            "url": event.url,
+            "user_id": event.user_id,
+            "clicked_at": now_iso,
+            "metadata": event.metadata or {},
+        },
+    )
+
+    script = {
+        "source": CLICK_UPDATE_SCRIPT,
+        "lang": "painless",
+        "params": {
+            "now_ms": now_ms,
+            "now_iso": now_iso,
+            "decay_per_hour": RANKING_DECAY_PER_HOUR,
+        },
+    }
+
+    upsert_doc = {
+        "url": event.url,
+        "title": event.url,
+        "summary": "",
+        "content": "",
+        "clicks_total": 1,
+        "recent_clicks": 1.0,
+        "last_clicked_at": now_iso,
+        "last_clicked_at_ms": now_ms,
+        "ranking_score": compute_ranking_score(
+            clicks_total=1,
+            recent_clicks=1.0,
+            last_clicked_at_ms=now_ms,
+            now_ms=now_ms,
+        ),
+    }
+
+    await asyncio.to_thread(
+        es.update,
+        index=ELASTICSEARCH_INDEX,
+        id=event.url,
+        script=script,
+        upsert=upsert_doc,
+        refresh="wait_for",
+    )
+
+    return {"status": "tracked", "url": event.url}
+
+
+@app.get("/debug/ranking", response_model=RankingDebug)
+def debug_ranking(url: str = Query(..., description="Exact URL / document ID to inspect")):
+    ensure_indices(es)
+    try:
+        doc = es.get(index=ELASTICSEARCH_INDEX, id=url)
+    except Exception as exc:  # pragma: no cover - passthrough for clarity
+        raise HTTPException(status_code=404, detail=f"Document not found: {url}") from exc
+
+    src = doc.get("_source", {})
+    now_ms = current_time_ms()
+    decay_hours = compute_decay_hours(src.get("last_clicked_at_ms"), now_ms=now_ms)
+    recomputed = compute_ranking_score(
+        clicks_total=src.get("clicks_total", 0),
+        recent_clicks=src.get("recent_clicks", 0.0),
+        last_clicked_at_ms=src.get("last_clicked_at_ms"),
+        now_ms=now_ms,
+    )
+
+    return RankingDebug(
+        url=src.get("url", url),
+        clicks_total=src.get("clicks_total", 0),
+        recent_clicks=float(src.get("recent_clicks", 0.0) or 0.0),
+        last_clicked_at=src.get("last_clicked_at"),
+        last_clicked_at_ms=src.get("last_clicked_at_ms"),
+        stored_ranking_score=src.get("ranking_score"),
+        recomputed_ranking_score=recomputed,
+        decay_hours=decay_hours,
+        decay_per_hour=RANKING_DECAY_PER_HOUR,
+        formula="log(clicks_total + 1) + (recent_clicks * 0.7) - (decay_hours * decay_per_hour)",
+    )
+
 
 # Run:
 # uvicorn app.search_api:app --host 0.0.0.0 --port 8000
