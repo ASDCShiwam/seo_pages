@@ -195,8 +195,8 @@ async def track_click(event: ClickEvent) -> dict:
 
     await asyncio.to_thread(
         es.index,
-        CLICK_EVENTS_INDEX,
-        {
+        index=CLICK_EVENTS_INDEX,
+        document={
             "url": event.url,
             "user_id": event.user_id,
             "clicked_at": now_iso,
@@ -233,8 +233,8 @@ async def track_click(event: ClickEvent) -> dict:
 
     await asyncio.to_thread(
         es.update,
-        ELASTICSEARCH_INDEX,
-        event.url,
+        index=ELASTICSEARCH_INDEX,
+        id=event.url,
         script=script,
         upsert=upsert_doc,
         refresh="wait_for",
