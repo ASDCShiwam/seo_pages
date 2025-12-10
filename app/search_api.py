@@ -72,7 +72,9 @@ class RankingDebug(BaseModel):
 CLICK_UPDATE_SCRIPT = """
 if (ctx._source.clicks_total == null) { ctx._source.clicks_total = 0; }
 if (ctx._source.recent_clicks == null) { ctx._source.recent_clicks = 0.0; }
-long prevLast = ctx._source.containsKey('last_clicked_at_ms') && ctx._source.last_clicked_at_ms != null ? ctx._source.last_clicked_at_ms : params.now_ms;
+long prevLast = ctx._source.containsKey('last_clicked_at_ms') && ctx._source.last_clicked_at_ms != null
+    ? ctx._source.last_clicked_at_ms
+    : params.now_ms;
 ctx._source.clicks_total += 1;
 ctx._source.recent_clicks += 1;
 ctx._source.last_clicked_at_ms = params.now_ms;
@@ -87,7 +89,9 @@ if (ctx._source.recent_clicks == null) { ctx._source.recent_clicks = 0.0; }
 if (ctx._source.clicks_total == null) { ctx._source.clicks_total = 0; }
 ctx._source.recent_clicks = ctx._source.recent_clicks * params.recent_click_multiplier;
 if (ctx._source.recent_clicks < 0.01) { ctx._source.recent_clicks = 0.0; }
-long last = ctx._source.containsKey('last_clicked_at_ms') && ctx._source.last_clicked_at_ms != null ? ctx._source.last_clicked_at_ms : params.now_ms;
+long last = ctx._source.containsKey('last_clicked_at_ms') && ctx._source.last_clicked_at_ms != null
+    ? ctx._source.last_clicked_at_ms
+    : params.now_ms;
 double decayHours = (params.now_ms - last) / 3_600_000.0;
 double decay = decayHours * params.decay_per_hour;
 ctx._source.ranking_score = Math.log(ctx._source.clicks_total + 1.0) + (ctx._source.recent_clicks * 0.7) - decay;
