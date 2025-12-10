@@ -156,46 +156,83 @@
 
           const hasH1 = !!item.h1;
           const hasMetaDesc = !!item.meta_description;
-
           const crawled = item.crawled_at
             ? new Date(item.crawled_at).toLocaleString()
             : 'Unknown';
-
           const contentLen = item.content_length || 0;
+          const rankingScore = typeof item.ranking_score === 'number'
+            ? item.ranking_score.toFixed(2)
+            : '—';
 
-          div.innerHTML = `
-            <a href="${item.url}" target="_blank"><h3>${item.title || item.url}</h3></a>
-            <div class="url">${item.url}</div>
+          // Build header link that logs clicks before opening the target URL
+          const headerLink = document.createElement('a');
+          headerLink.href = item.url;
+          headerLink.target = '_blank';
+          headerLink.addEventListener('click', (e) => handleResultClick(e, item.url));
 
-            <div class="meta">
-              <span class="label">H1:&nbsp;</span>
-              ${item.h1 ? item.h1 : '<em>No H1 found</em>'}
-            </div>
+          const header = document.createElement('h3');
+          header.textContent = item.title || item.url;
+          headerLink.appendChild(header);
 
-            <div class="meta">
-              <span class="label">Meta Description:&nbsp;</span>
-              ${item.meta_description ? item.meta_description : '<em>No meta description</em>'}
-            </div>
+          const urlDiv = document.createElement('div');
+          urlDiv.className = 'url';
+          urlDiv.textContent = item.url;
 
-            <div class="snippet">${item.snippet}</div>
+          const h1Meta = document.createElement('div');
+          h1Meta.className = 'meta';
+          h1Meta.innerHTML = `<span class="label">H1:&nbsp;</span>${item.h1 ? item.h1 : '<em>No H1 found</em>'}`;
 
-            <div class="badges">
-              <span class="badge">Score: ${item.score.toFixed(2)}</span>
-              <span class="badge">Content length: ${contentLen}</span>
-              <span class="badge">Crawled: ${crawled}</span>
-              ${hasH1
-                ? '<span class="badge good">H1 OK</span>'
-                : '<span class="badge bad">Missing H1</span>'}
-              ${hasMetaDesc
-                ? '<span class="badge good">Meta desc OK</span>'
-                : '<span class="badge bad">Missing meta description</span>'}
-            </div>
+          const metaDesc = document.createElement('div');
+          metaDesc.className = 'meta';
+          metaDesc.innerHTML = `<span class="label">Meta Description:&nbsp;</span>${item.meta_description ? item.meta_description : '<em>No meta description</em>'}`;
+
+          const snippet = document.createElement('div');
+          snippet.className = 'snippet';
+          snippet.textContent = item.snippet;
+
+          const badges = document.createElement('div');
+          badges.className = 'badges';
+
+          badges.innerHTML = `
+            <span class="badge">Score: ${item.score.toFixed(2)}</span>
+            <span class="badge">Ranking: ${rankingScore}</span>
+            <span class="badge">Content length: ${contentLen}</span>
+            <span class="badge">Crawled: ${crawled}</span>
+            ${hasH1
+              ? '<span class="badge good">H1 OK</span>'
+              : '<span class="badge bad">Missing H1</span>'}
+            ${hasMetaDesc
+              ? '<span class="badge good">Meta desc OK</span>'
+              : '<span class="badge bad">Missing meta description</span>'}
           `;
+
+          div.appendChild(headerLink);
+          div.appendChild(urlDiv);
+          div.appendChild(h1Meta);
+          div.appendChild(metaDesc);
+          div.appendChild(snippet);
+          div.appendChild(badges);
+
           resDiv.appendChild(div);
         });
       } catch (e) {
         resDiv.innerHTML = 'Error calling search API: ' + e.message;
         console.error(e);
+      }
+    }
+
+    async function handleResultClick(e, url) {
+      e.preventDefault();
+      try {
+        await fetch('http://localhost:8000/track_click', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+      } catch (err) {
+        console.warn('Failed to track click', err);
+      } finally {
+        window.open(url, '_blank');
       }
     }
 
