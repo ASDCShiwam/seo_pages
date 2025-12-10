@@ -4,10 +4,10 @@ ELASTICSEARCH_INDEX = "seo_pages"
 # For now you can use some simple site to test.
 # Later change to http://localhost/your_iis_site/, etc.
 SEED_URLS = [
-    "https://docs.djangoproject.com/en/5.2/",   # change this when you want intranet only
+    "https://www.adda247.com/",   # change this when you want intranet only
 ]
 
-CRAWL_MAX_PAGES = 1000           # keep small for testing
+CRAWL_MAX_PAGES =500         # keep small for testing
 CRAWL_SAME_DOMAIN_ONLY = False
 REQUEST_TIMEOUT = 10
 USER_AGENT = "OfflineSEOEngine/1.0"

@@ -2,60 +2,209 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Offline Search (Localhost)</title>
+  <title>Offline SEO Search (Localhost)</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 2rem; background:#111; color:#eee; }
-    .result { margin-bottom: 1rem; padding-bottom:1rem; border-bottom:1px solid #444; }
-    input[type="text"] { width: 400px; padding:0.5rem; }
-    button { padding:0.5rem 1rem; margin-left:0.5rem; }
-    .snippet { color:#ccc; margin-top:0.25rem; }
-    a { color:#5af; text-decoration:none; }
-    a:hover { text-decoration:underline; }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2rem;
+      background: #0b0b0b;
+      color: #f1f1f1;
+    }
+    h1 {
+      margin-bottom: 1rem;
+    }
+    .search-bar {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    input[type="text"] {
+      width: 320px;
+      max-width: 100%;
+      padding: 0.5rem;
+      border-radius: 4px;
+      border: 1px solid #444;
+      background: #111;
+      color: #f1f1f1;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      background: #2563eb;
+      color: #fff;
+      font-weight: 600;
+    }
+    button:hover {
+      background: #1d4ed8;
+    }
+    .result {
+      margin-bottom: 1rem;
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      border: 1px solid #333;
+      background: #111;
+    }
+    .result h3 {
+      margin: 0 0 0.25rem 0;
+      font-size: 1.05rem;
+    }
+    .result a {
+      color: #60a5fa;
+      text-decoration: none;
+    }
+    .result a:hover {
+      text-decoration: underline;
+    }
+    .url {
+      font-size: 0.85rem;
+      color: #9ca3af;
+      margin-bottom: 0.25rem;
+      word-break: break-all;
+    }
+    .meta {
+      font-size: 0.85rem;
+      color: #d1d5db;
+      margin-bottom: 0.25rem;
+    }
+    .label {
+      font-weight: 600;
+      color: #9ca3af;
+    }
+    .snippet {
+      color: #e5e7eb;
+      margin-top: 0.25rem;
+      font-size: 0.9rem;
+    }
+    .badges {
+      margin-top: 0.25rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      font-size: 0.75rem;
+    }
+    .badge {
+      padding: 0.15rem 0.45rem;
+      border-radius: 999px;
+      border: 1px solid #374151;
+      background: #111827;
+      color: #e5e7eb;
+    }
+    .badge.bad {
+      border-color: #b91c1c;
+      background: #7f1d1d;
+    }
+    .badge.good {
+      border-color: #15803d;
+      background: #14532d;
+    }
+    .footer {
+      margin-top: 2rem;
+      font-size: 0.75rem;
+      color: #6b7280;
+    }
   </style>
 </head>
 <body>
-  <h1>Offline Search (Localhost)</h1>
-  <input id="q" type="text" placeholder="Search..." />
-  <button onclick="doSearch()">Search</button>
+  <h1>Offline SEO Search (Localhost)</h1>
+
+  <div class="search-bar">
+    <input id="q" type="text" placeholder="Search pages..." />
+    <button onclick="doSearch()">Search</button>
+    <span id="info" style="font-size:0.8rem;color:#9ca3af;"></span>
+  </div>
+
   <div id="results" style="margin-top:1.5rem;"></div>
+
+  <div class="footer">
+    Data from Elasticsearch index <code>seo_pages</code> on <code>http://localhost:8000/search</code>.
+  </div>
 
   <script>
     async function doSearch() {
-  const q = document.getElementById('q').value.trim();
-  if (!q) return;
-  const resDiv = document.getElementById('results');
-  resDiv.innerHTML = 'Searching...';
+      const qInput = document.getElementById('q');
+      const q = qInput.value.trim();
+      const info = document.getElementById('info');
+      const resDiv = document.getElementById('results');
 
-  try {
-    const res = await fetch('http://localhost:8000/search?q=' + encodeURIComponent(q));
-    if (!res.ok) {
-      throw new Error('Network response was not ok');
+      if (!q) return;
+
+      resDiv.innerHTML = 'Searching...';
+      info.textContent = '';
+
+      try {
+        const res = await fetch('http://localhost:8000/search?q=' + encodeURIComponent(q));
+        if (!res.ok) {
+          throw new Error('Network response was not ok');
+        }
+        const data = await res.json();
+
+        if (!data.length) {
+          resDiv.innerHTML = '<p>No results.</p>';
+          return;
+        }
+
+        resDiv.innerHTML = '';
+        info.textContent = `Found ${data.length} result(s).`;
+
+        data.forEach(item => {
+          const div = document.createElement('div');
+          div.className = 'result';
+
+          const hasH1 = !!item.h1;
+          const hasMetaDesc = !!item.meta_description;
+
+          const crawled = item.crawled_at
+            ? new Date(item.crawled_at).toLocaleString()
+            : 'Unknown';
+
+          const contentLen = item.content_length || 0;
+
+          div.innerHTML = `
+            <a href="${item.url}" target="_blank"><h3>${item.title || item.url}</h3></a>
+            <div class="url">${item.url}</div>
+
+            <div class="meta">
+              <span class="label">H1:&nbsp;</span>
+              ${item.h1 ? item.h1 : '<em>No H1 found</em>'}
+            </div>
+
+            <div class="meta">
+              <span class="label">Meta Description:&nbsp;</span>
+              ${item.meta_description ? item.meta_description : '<em>No meta description</em>'}
+            </div>
+
+            <div class="snippet">${item.snippet}</div>
+
+            <div class="badges">
+              <span class="badge">Score: ${item.score.toFixed(2)}</span>
+              <span class="badge">Content length: ${contentLen}</span>
+              <span class="badge">Crawled: ${crawled}</span>
+              ${hasH1
+                ? '<span class="badge good">H1 OK</span>'
+                : '<span class="badge bad">Missing H1</span>'}
+              ${hasMetaDesc
+                ? '<span class="badge good">Meta desc OK</span>'
+                : '<span class="badge bad">Missing meta description</span>'}
+            </div>
+          `;
+          resDiv.appendChild(div);
+        });
+      } catch (e) {
+        resDiv.innerHTML = 'Error calling search API: ' + e.message;
+        console.error(e);
+      }
     }
-    const data = await res.json();
 
-    if (!data.length) {
-      resDiv.innerHTML = '<p>No results.</p>';
-      return;
-    }
-
-    resDiv.innerHTML = '';
-    data.forEach(item => {
-      const div = document.createElement('div');
-      div.className = 'result';
-      div.innerHTML = `
-        <a href="${item.url}" target="_blank"><h3>${item.title || item.url}</h3></a>
-        <div class="snippet">${item.snippet}</div>
-        <small>Score: ${item.score.toFixed(2)}</small>
-      `;
-      resDiv.appendChild(div);
+    // Enter key to search
+    document.getElementById('q').addEventListener('keyup', function (e) {
+      if (e.key === 'Enter') {
+        doSearch();
+      }
     });
-  } catch (e) {
-    resDiv.innerHTML = 'Error calling search API: ' + e.message;
-    console.error(e);
-  }
-}
-
-    
   </script>
 </body>
 </html>
